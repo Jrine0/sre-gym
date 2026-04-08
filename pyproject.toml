@@ -25,6 +25,9 @@ spaces = [
     "huggingface_hub>=0.20",
 ]
 
+[project.scripts]
+sre-gym = "sre_gym.cli:app"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
