@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
@@ -11,22 +10,20 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from sre_gym.env import SREGymEnv, EnvConfig
-from sre_gym.models import K8sAction, K8sActionType
-
-
-# =============================================================================
-# OpenEnv Integration
-# =============================================================================
-
 from openenv.core.env_server import create_fastapi_app
 
-# Create the environment instance
-_env = SREGymEnv(EnvConfig(task_difficulty="easy"))
 
-# Create FastAPI app with OpenEnv
-app = create_fastapi_app(_env)
+def main():
+    """Run the OpenEnv FastAPI server."""
+    # Create the environment instance
+    env = SREGymEnv(EnvConfig(task_difficulty="easy"))
+
+    # Create FastAPI app with OpenEnv
+    app = create_fastapi_app(env)
+
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
 
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    main()
