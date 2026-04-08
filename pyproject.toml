@@ -27,7 +27,7 @@ spaces = [
 
 [project.scripts]
 sre-gym = "sre_gym.cli:app"
-openenv-server = "server.app:main"
+server = "server.app:run"
 
 [build-system]
 requires = ["hatchling"]
