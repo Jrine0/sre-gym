@@ -1,0 +1,103 @@
+version: "1.0"
+name: sre-gym
+display_name: Self-Healing Kubernetes SRE Gym
+description: RL training environment for K8s troubleshooting - diagnose and fix production errors using kubectl tools
+port: 8000
+spec_version: "2024-11-05"
+
+runtime:
+  type: docker
+  image: sre-gym:latest
+  resources:
+    cpus: 2
+    memory_gb: 8
+
+tasks:
+  - id: easy
+    name: CrashLoopBackOff - Missing ConfigMap
+    description: A pod is in CrashLoopBackOff because it references a ConfigMap that doesn't exist. Fix by creating the missing ConfigMap.
+    difficulty: easy
+    max_steps: 15
+    reward_range: [0.0, 1.0]
+
+  - id: medium
+    name: OOMKilled - Memory Limit Triage
+    description: A pod is OOMKilled because its memory limit is set too low. Fix by adjusting the memory limit.
+    difficulty: medium
+    max_steps: 20
+    reward_range: [0.0, 1.0]
+
+  - id: hard
+    name: Cascading Failure - Multi-Service
+    description: Three microservices have a cascading failure. The database times out, causing API latency spikes. Diagnose and resolve the root cause.
+    difficulty: hard
+    max_steps: 30
+    reward_range: [0.0, 1.0]
+
+observation_space:
+  kubectl_output:
+    type: string
+    description: Raw stdout from kubectl command
+  error_message:
+    type: string
+    nullable: true
+    description: Descriptive error if failed
+  pod_status:
+    type: string
+    nullable: true
+    description: Current pod phase
+  health_score:
+    type: float
+    range: [0.0, 1.0]
+    description: System health score based on pod states
+  step_number:
+    type: integer
+    range: [0, 30]
+    description: Current step in episode
+
+action_space:
+  action_type:
+    type: enum
+    values:
+      - apply_manifest
+      - delete_resource
+      - scale_deployment
+      - edit_resource
+      - exec_command
+      - noop
+    description: Type of kubectl action
+  manifest:
+    type: string
+    nullable: true
+    description: YAML manifest content
+  resource_kind:
+    type: string
+    nullable: true
+    description: Kubernetes resource kind
+  resource_name:
+    type: string
+    nullable: true
+    description: Resource name
+  namespace:
+    type: string
+    default: default
+    description: Kubernetes namespace
+  command:
+    type: array
+    nullable: true
+    description: Command arguments
+  options:
+    type: object
+    description: Additional options
+
+reward_function:
+  type: pbrs
+  description: |
+    Potential-Based Reward Shaping with dense shaping rewards,
+    step penalties, and sparse terminal reward. All clamped [0.0, 1.0].
+
+logging:
+  markers:
+    - "[START]"
+    - "[STEP]"
+    - "[END]"

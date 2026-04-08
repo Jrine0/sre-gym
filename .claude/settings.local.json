@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"from sre_gym.tasks.easy import EasyTask; from sre_gym.tasks.medium import MediumTask; from sre_gym.tasks.hard import HardTask; print\\(''All tasks import OK''\\)\")",
+      "Bash(python -c \"from sre_gym.env import SREGymEnv, EnvConfig; print\\(''env imports OK''\\)\")",
+      "Bash(python -c \"from sre_gym.cli import app; from sre_gym.inference import run_episode, print_episode_log; print\\(''cli and inference imports OK''\\)\")",
+      "Bash(python -c \"from sre_gym.cli import app; print\\(''cli imports OK''\\)\")",
+      "Bash(python -m py_compile sre_gym/inference.py)",
+      "Bash(python -m py_compile sre_gym/mcp_server.py)",
+      "Bash(python -m sre_gym.cli validate)",
+      "Bash(python -c \"from sre_gym.tasks.easy import EasyTask, EasyTaskConfig; c = EasyTaskConfig\\(\\); print\\(''EasyTaskConfig:'', c\\)\")",
+      "Bash(python -c \"from sre_gym.env import SREGymEnv, EnvConfig; env = SREGymEnv\\(EnvConfig\\(task_difficulty=''easy''\\)\\); print\\(''Environment created OK''\\)\")",
+      "Bash(python -m pytest tests/ -v)",
+      "mcp__OpusCode__web_search",
+      "Bash(python -m pytest tests/ -v --tb=short)",
+      "Bash(python inference.py --help)",
+      "Bash(pip install:*)",
+      "Bash(python -m pytest tests/ -q)"
+    ]
+  }
+}
