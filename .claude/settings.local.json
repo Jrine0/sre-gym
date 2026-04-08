@@ -15,7 +15,8 @@
       "Bash(python -m pytest tests/ -v --tb=short)",
       "Bash(python inference.py --help)",
       "Bash(pip install:*)",
-      "Bash(python -m pytest tests/ -q)"
+      "Bash(python -m pytest tests/ -q)",
+      "WebFetch(domain:www.gradio.app)"
     ]
   }
 }
