@@ -5,8 +5,7 @@ description = "Self-Healing Kubernetes SRE Gym - RL training environment for K8s
 requires-python = ">=3.10"
 dependencies = [
     "pydantic>=2.9",
-    "openenv-core",
-    "kubernetes>=29.0",
+    "openenv-core>=0.2.3",
     "openai>=1.30",
     "structlog>=24.0",
     "typer>=0.12",
