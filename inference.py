@@ -115,18 +115,18 @@ class K8sAgent:
 
         self.model = model
         self._system_prompt = (
-            "You are an SRE agent debugging a Kubernetes cluster. "
-            "Use kubectl commands to diagnose and fix failing pods. "
-            "Be concise and precise with kubectl syntax.\n\n"
-            "Available actions (use exactly these action_type values):\n"
-            "- apply_manifest: Apply YAML manifest to create/update resources\n"
-            "- delete_resource: Delete a pod, configmap, or other resource\n"
-            "- scale_deployment: Scale a deployment to N replicas\n"
-            "- exec_command: Execute command inside a pod\n"
-            "- noop: Wait and observe (incurs step penalty)\n\n"
-            "Respond with JSON only in this format:\n"
-            '{"action_type": "apply_manifest", "manifest": "...", "namespace": "default"}\n'
-            "or\n"
+            "You are an SRE agent debugging a Kubernetes cluster.\n\n"
+            "TASK: Fix the failing pod by creating missing resources.\n\n"
+            "COMMON FIXES:\n"
+            "- If error mentions 'ConfigMap' not found: Create the ConfigMap\n"
+            "- If error mentions 'OOMKilled': Delete the pod and fix memory limits\n"
+            "- If error mentions 'CrashLoopBackOff': Check what's missing and create it\n\n"
+            "Available actions:\n"
+            "- apply_manifest: Use this to create ConfigMaps, fix pod specs\n"
+            "- delete_resource: Use this to delete and recreate pods\n"
+            "- noop: Only if pod is already Running\n\n"
+            "Respond with JSON ONLY. Examples:\n"
+            '{"action_type": "apply_manifest", "manifest": "apiVersion: v1\\nkind: ConfigMap\\nmetadata:\\n  name: db-config\\ndata:\\n  key: value", "namespace": "default"}\n'
             '{"action_type": "noop"}'
         )
         self._conversation_history: list[dict] = []
@@ -140,9 +140,9 @@ class K8sAgent:
 - kubectl output: {observation.get('kubectl_output', '')[:500]}
 - Step: {observation.get('step_number', 0)}
 
-{task_hint}
+IMPORTANT HINT: {task_hint}
 
-Respond with JSON action."""
+Take action NOW to fix the issue. If pod is failing, DO something - create missing resources, delete and recreate pods, etc."""
 
         messages = [
             {"role": "system", "content": self._system_prompt},
