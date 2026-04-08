@@ -21,11 +21,11 @@ env = SREGymEnv(EnvConfig(task_difficulty="easy"))
 app = create_fastapi_app(env, K8sAction, K8sObservation)
 
 
-def run():
-    """Run the server."""
+def main():
+    """Run the OpenEnv server."""
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
 
 
 if __name__ == "__main__":
-    run()
+    main()
