@@ -182,18 +182,23 @@ Respond with JSON action."""
             print(f"# WARNING: LLM call failed: {e}, defaulting to noop", flush=True)
             action_data = {"action_type": "noop"}
 
+        # Normalize command field - it can be a string or list
+        command = action_data.get("command")
+        if command is not None and isinstance(command, str):
+            command = command.split() if command.strip() else None
+
         action = K8sAction(
             action_type=K8sActionType(action_data.get("action_type", "noop")),
             manifest=action_data.get("manifest"),
             resource_kind=action_data.get("resource_kind"),
             resource_name=action_data.get("resource_name"),
             namespace=action_data.get("namespace", "default"),
-            command=action_data.get("command"),
+            command=command,
             options=action_data.get("options", {}),
         )
 
         self._conversation_history.append({
-            "observation": observation,
+            "observation": obs,
             "action": action_data,
         })
         return action
