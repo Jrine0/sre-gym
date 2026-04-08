@@ -198,7 +198,7 @@ Respond with JSON action."""
         )
 
         self._conversation_history.append({
-            "observation": obs,
+            "observation": observation,
             "action": action_data,
         })
         return action
