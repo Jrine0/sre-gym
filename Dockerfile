@@ -5,29 +5,31 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install kubectl
+# Install minimal dependencies for HF Spaces
+# Note: kubectl/kind not needed in container - they are for local dev only
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
-    ca-certificates \
-    && curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" \
-    && chmod +x kubectl \
-    && mv kubectl /usr/local/bin/ \
-    && curl -Lo /usr/local/bin/kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64 \
-    && chmod +x /usr/local/bin/kind \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
 # Copy project files
 COPY pyproject.toml .
 COPY sre_gym/ ./sre_gym/
-COPY tests/ ./tests/
 COPY inference.py .
 COPY app.py .
 COPY openenv.yaml .
 
-# Install base dependencies + HF Spaces dependencies
-RUN pip install --no-cache-dir ".[spaces]" || pip install --no-cache-dir .
+# Install dependencies (minimal for HF Spaces)
+# Note: kubernetes package is only for local kubectl access
+# For production, set KUBECONFIG env var to connect to cluster
+RUN pip install --no-cache-dir \
+    "pydantic>=2.9" \
+    "openai>=1.30" \
+    "typer>=0.12" \
+    "gradio>=4.0" \
+    "huggingface_hub>=0.20" \
+    || pip install --no-cache-dir .
 
-# For HF Spaces: entrypoint.sh is not needed, app.py runs directly
 ENV PYTHONUNBUFFERED=1
 
 # Health check

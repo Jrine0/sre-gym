@@ -60,13 +60,27 @@ jobs:
           SIZE=$(docker images sre-gym --format "{{.Size}}" | head -1)
           echo "Image size: $SIZE"
 
-      - name: Fail if image exceeds 2GB
-        run: |
-          SIZE=$(docker images sre-gym --format "{{.Size}}" | head -1 | sed 's/MB//; s/GB//')
-          echo "Parsed size: $SIZE"
-          # Allow some tolerance - image must be under 2.1GB to account for rounding
-          if echo "$SIZE > 2.1" | bc -l 2>/dev/null || [ "$SIZE" -gt 2100 ] 2>/dev/null; then
-            echo "Image exceeds 2GB limit"
+          # Convert to MB for comparison
+          if echo "$SIZE" | grep -q "GB"; then
+            # Convert GB to MB
+            NUM=$(echo "$SIZE" | sed 's/GB//')
+            SIZE_MB=$(echo "$NUM * 1000" | bc)
+          elif echo "$SIZE" | grep -q "MB"; then
+            SIZE_MB=$(echo "$SIZE" | sed 's/MB//')
+          elif echo "$SIZE" | grep -q "KB"; then
+            NUM=$(echo "$SIZE" | sed 's/KB//')
+            SIZE_MB=$(echo "$NUM / 1024" | bc)
+          else
+            # Bytes
+            NUM=$(echo "$SIZE" | sed 's/B//')
+            SIZE_MB=$(echo "$NUM / 1024 / 1024" | bc)
+          fi
+
+          echo "Size in MB: $SIZE_MB"
+
+          # Fail if exceeds 2000MB (2GB)
+          if [ $(echo "$SIZE_MB > 2000" | bc) -eq 1 ]; then
+            echo "FAIL: Image exceeds 2GB limit ($SIZE_MB MB)"
             exit 1
           fi
-          echo "Image size is acceptable"
+          echo "PASS: Image size is acceptable ($SIZE)"
