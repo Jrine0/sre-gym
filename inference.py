@@ -7,23 +7,21 @@ structured logs in the required [START]/[STEP]/[END] format.
 Usage:
     python inference.py --task easy --episodes 10
 
-Environment Variables Required:
+Environment Variables (from .env file or system):
     API_BASE_URL: The API endpoint for the LLM
         - OpenAI: https://api.openai.com/v1
         - Groq (FREE): https://api.groq.com/openai/v1
         - Hugging Face: https://api-inference.huggingface.co/v1
-        - Together AI: https://api.together.xyz/v1
     MODEL_NAME: The model identifier
-        - OpenAI: gpt-4o, gpt-4o-mini
-        - Groq: llama-3.3-70b-versatile, mixtral-8x7b-32768
+        - OpenAI: gpt-4o
+        - Groq: llama-3.3-70b-versatile
         - HF: meta-llama/Llama-3.2-3B-Instruct
     OPENAI_API_KEY: API key for the provider
-    HF_TOKEN: Hugging Face token (for HF Inference API)
+    HF_TOKEN: Hugging Face token (optional)
 
 Output Format:
     [START] task=easy episode=1/10 timestamp=2026-01-01T00:00:00Z
     [STEP] step=1 action=apply_manifest reward=0.05 observation=...
-    [STEP] step=2 action=noop reward=0.10 observation=...
     [END] episode=1 total_reward=0.85 success=true steps=5 duration=12.34
 """
 
@@ -34,7 +32,18 @@ import os
 import sys
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
+
+# Load .env file if present
+_env_file = Path(__file__).parent / ".env"
+if _env_file.exists():
+    with open(_env_file) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, value = line.split("=", 1)
+                os.environ.setdefault(key.strip(), value.strip())
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

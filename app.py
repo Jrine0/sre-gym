@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Hugging Face Spaces Gradio App for SRE Gym.
+"""Hugging Face Spaces - OpenEnv + Gradio for SRE Gym.
 
-This app provides a web interface to run the SRE Gym environment
-and visualize agent performance.
+This app exposes both:
+1. OpenEnv FastAPI endpoints (/reset, /step, /state)
+2. Gradio web interface
 """
 
 from __future__ import annotations
@@ -11,13 +12,26 @@ import json
 import os
 import sys
 import time
+from pathlib import Path
 from datetime import datetime, timezone
 
 import gradio as gr
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
 
+# Load .env file if present
+_env_file = Path(__file__).parent / ".env"
+if _env_file.exists():
+    with open(_env_file) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, value = line.split("=", 1)
+                os.environ.setdefault(key.strip(), value.strip())
+
 # Add parent directory to path for imports
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, str(Path(__file__).parent))
 
 from sre_gym.env import SREGymEnv, EnvConfig
 from sre_gym.models import K8sAction, K8sActionType
@@ -32,17 +46,108 @@ MODEL_NAME = os.environ.get("MODEL_NAME", "llama-3.3-70b-versatile")
 
 
 # =============================================================================
-# Agent
+# FastAPI OpenEnv Endpoints
+# =============================================================================
+
+app = FastAPI(title="SRE Gym - OpenEnv")
+
+# Add CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Global environment instance
+_env: SREGymEnv | None = None
+
+
+@app.get("/")
+async def root():
+    """Health check."""
+    return {"status": "ok", "name": "sre-gym"}
+
+
+@app.get("/health")
+async def health():
+    """Health check endpoint."""
+    return {"status": "healthy"}
+
+
+@app.post("/reset")
+async def reset(task_id: str | None = None):
+    """Reset environment and return initial observation."""
+    global _env
+    try:
+        _env = SREGymEnv(EnvConfig(task_difficulty=task_id or "easy"))
+        obs = _env.reset()
+        return obs.model_dump()
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/step")
+async def step(action: dict):
+    """Execute one step with the given action."""
+    global _env
+    if _env is None:
+        return {"error": "Environment not initialized. Call /reset first."}
+
+    try:
+        k8s_action = K8sAction(
+            action_type=K8sActionType(action.get("action_type", "noop")),
+            manifest=action.get("manifest"),
+            resource_kind=action.get("resource_kind"),
+            resource_name=action.get("resource_name"),
+            namespace=action.get("namespace", "default"),
+            command=action.get("command"),
+            options=action.get("options", {}),
+        )
+        obs, reward, done, info = _env.step(k8s_action)
+        return {
+            "observation": obs.model_dump(),
+            "reward": reward,
+            "done": done,
+            "info": info,
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/state")
+async def state():
+    """Get current environment state."""
+    global _env
+    if _env is None:
+        return {"error": "Environment not initialized. Call /reset first."}
+    return _env.state()
+
+
+@app.get("/tasks")
+async def tasks():
+    """List available tasks."""
+    return {
+        "tasks": [
+            {"id": "easy", "name": "CrashLoopBackOff - Missing ConfigMap"},
+            {"id": "medium", "name": "OOMKilled - Memory Limit Triage"},
+            {"id": "hard", "name": "Cascading Failure - Multi-Service"},
+        ]
+    }
+
+
+# =============================================================================
+# LLM Agent
 # =============================================================================
 
 class K8sAgent:
-    """Simple LLM agent for K8s troubleshooting."""
+    """LLM agent for K8s troubleshooting."""
 
     def __init__(self, model: str = MODEL_NAME):
         api_key = os.environ.get("OPENAI_API_KEY", "")
         hf_token = os.environ.get("HF_TOKEN", "")
 
-        # Use HF_TOKEN for HF Inference API
         if "huggingface" in API_BASE_URL.lower():
             self.client = OpenAI(api_key=hf_token, base_url=API_BASE_URL)
         else:
@@ -149,48 +254,57 @@ def run_episode(task: str, max_steps: int, model_name: str) -> tuple[str, dict]:
     return "\n".join(log_lines), results
 
 
-def main():
-    """Launch Gradio interface."""
-    with gr.Blocks(title="SRE Gym") as demo:
-        gr.Markdown("# SRE Gym - Kubernetes Troubleshooting Agent")
-        gr.Markdown("Train AI agents to diagnose and fix K8s production faults.")
+# =============================================================================
+# Mount Gradio app
+# =============================================================================
 
-        with gr.Row():
-            with gr.Column():
-                task = gr.Dropdown(
-                    choices=["easy", "medium", "hard"],
-                    value="easy",
-                    label="Task Difficulty"
-                )
-                max_steps = gr.Slider(minimum=5, maximum=30, value=15, step=1, label="Max Steps")
-                model_name = gr.Textbox(value=MODEL_NAME, label="Model Name")
-                run_btn = gr.Button("Run Episode", variant="primary")
+gradio_app = gr.Blocks(title="SRE Gym")
 
-            with gr.Column():
-                log_output = gr.Textbox(label="Episode Log", lines=15)
-                results_output = gr.JSON(label="Results")
+with gradio_app:
+    gr.Markdown("# SRE Gym - Kubernetes Troubleshooting Agent")
+    gr.Markdown("Train AI agents to diagnose and fix K8s production faults.")
 
-        gr.Markdown("""
-        ## Tasks
-        - **Easy**: CrashLoopBackOff - Missing ConfigMap
-        - **Medium**: OOMKilled - Memory Limit too low
-        - **Hard**: Cascading Failure - 3 microservices down
+    with gr.Row():
+        with gr.Column():
+            task = gr.Dropdown(
+                choices=["easy", "medium", "hard"],
+                value="easy",
+                label="Task Difficulty"
+            )
+            max_steps = gr.Slider(minimum=5, maximum=30, value=15, step=1, label="Max Steps")
+            model_name = gr.Textbox(value=MODEL_NAME, label="Model Name")
+            run_btn = gr.Button("Run Episode", variant="primary")
 
-        ## Environment Variables
-        Set these in HF Space secrets:
-        - OPENAI_API_KEY or HF_TOKEN
-        - API_BASE_URL (default: https://api.groq.com/openai/v1)
-        - MODEL_NAME (default: llama-3.3-70b-versatile)
-        """)
+        with gr.Column():
+            log_output = gr.Textbox(label="Episode Log", lines=15)
+            results_output = gr.JSON(label="Results")
 
-        run_btn.click(
-            fn=run_episode,
-            inputs=[task, max_steps, model_name],
-            outputs=[log_output, results_output]
-        )
+    gr.Markdown("""
+    ## Tasks
+    - **Easy**: CrashLoopBackOff - Missing ConfigMap
+    - **Medium**: OOMKilled - Memory Limit too low
+    - **Hard**: Cascading Failure - 3 microservices down
 
-    demo.launch(server_name="0.0.0.0", server_port=7860)
+    ## OpenEnv API
+    - POST /reset?task_id=easy
+    - POST /step
+    - GET /state
+    """)
 
+    run_btn.click(
+        fn=run_episode,
+        inputs=[task, max_steps, model_name],
+        outputs=[log_output, results_output]
+    )
+
+# Mount Gradio app
+app = gr.mount_gradio_app(app, gradio_app, path="/")
+
+
+# =============================================================================
+# Main
+# =============================================================================
 
 if __name__ == "__main__":
-    main()
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=7860)

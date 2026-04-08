@@ -76,9 +76,19 @@ class SREGymEnv:
                     "Use: easy | medium | hard"
                 )
 
-    def reset(self) -> K8sObservation:
-        """Reset environment to initial state, return first observation."""
+    def reset(self, task_id: str | None = None) -> K8sObservation:
+        """Reset environment to initial state, return first observation.
+
+        Args:
+            task_id: Optional task identifier (easy/medium/hard) for OpenEnv API.
+                    If provided, overrides the configured task_difficulty.
+        """
         self._reward_engine.reset()
+
+        # Support task_id from OpenEnv validator
+        if task_id and task_id in ("easy", "medium", "hard"):
+            self.config.task_difficulty = task_id
+            self._task_instance = self._create_task()
 
         # Clean up any existing pods from previous episode
         self._cleanup()
@@ -240,6 +250,18 @@ class SREGymEnv:
     def close(self) -> None:
         """Clean up resources when done."""
         self._cleanup()
+
+    def state(self) -> dict[str, Any]:
+        """Return current state for OpenEnv API."""
+        if self._state is None:
+            return {}
+        return {
+            "step_number": self._state.step_number,
+            "healthy_pods": self._state.healthy_pods,
+            "total_pods": self._state.total_pods,
+            "failed_pods": self._state.failed_pods,
+            "penalties_accumulated": self._state.penalties_accumulated,
+        }
 
     @property
     def observation_space(self) -> dict[str, Any]:
