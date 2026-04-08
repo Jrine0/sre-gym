@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # SRE Gym - Self-Healing Kubernetes SRE Gym
 
 An RL training environment for AI agents to diagnose and fix Kubernetes production errors using kubectl tools. Trains agents on realistic K8s failure scenarios with dense PBRS rewards.
@@ -263,3 +264,17 @@ OPENAI_API_KEY=xxx python inference.py --task easy --episodes 10
 ## License
 
 Apache 2.0
+=======
+---
+title: Sre Gym
+emoji: 🐠
+colorFrom: gray
+colorTo: purple
+sdk: gradio
+sdk_version: 6.11.0
+app_file: app.py
+pinned: false
+---
+
+Check out the configuration reference at https://huggingface.co/docs/hub/spaces-config-reference
+>>>>>>> a04ca6706fb3c40f446be32f0de1e386bbb307fb
