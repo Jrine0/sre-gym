@@ -18,7 +18,8 @@
       "Bash(python -m pytest tests/ -q)",
       "WebFetch(domain:www.gradio.app)",
       "WebFetch(domain:github.com)",
-      "Bash(uv lock:*)"
+      "Bash(uv lock:*)",
+      "Bash(python -c \"from sre_gym.env import SREGymEnv, EnvConfig, KUBECTL_AVAILABLE, SIM_STATE; print\\(f''kubectl available: {KUBECTL_AVAILABLE}''\\); env = SREGymEnv\\(EnvConfig\\(task_difficulty=''easy''\\)\\); obs = env.reset\\(\\); print\\(f''Reset OK: {obs.pod_status}''\\)\")"
     ]
   }
 }

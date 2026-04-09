@@ -15,6 +15,91 @@ from sre_gym.tasks.medium import MediumTask
 from sre_gym.tasks.hard import HardTask
 
 
+def _check_kubectl_available() -> bool:
+    """Check if kubectl is available and cluster is reachable."""
+    try:
+        result = subprocess.run(
+            ["kubectl", "cluster-info"],
+            capture_output=True,
+            timeout=10,
+        )
+        return result.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+
+
+# Check at module load
+KUBECTL_AVAILABLE = _check_kubectl_available()
+
+
+class SimState:
+    """Simulates K8s state when kubectl is not available."""
+
+    def __init__(self):
+        self.configmaps: set[str] = set()
+        self.pods_fixed: set[str] = set()
+        self.pods_deleted: set[str] = set()
+
+    def reset(self):
+        self.configmaps.clear()
+        self.pods_fixed.clear()
+        self.pods_deleted.clear()
+
+    def apply_manifest(self, manifest: str) -> str:
+        """Simulate applying a manifest."""
+        if not manifest:
+            return "Error: No manifest"
+
+        lines = manifest.split("\n")
+        in_configmap = False
+        cm_name = None
+
+        for line in lines:
+            line = line.strip()
+            if line == "---":
+                in_configmap = False
+                cm_name = None
+            if line.startswith("kind:"):
+                if "ConfigMap" in line:
+                    in_configmap = True
+            if line.startswith("name:") and in_configmap and cm_name is None:
+                cm_name = line.split("name:")[1].strip()
+                self.configmaps.add(cm_name)
+                return f"configmap/{cm_name} created"
+
+        # Check for pod names
+        for line in lines:
+            if line.startswith("name:"):
+                pod_name = line.split("name:")[1].strip()
+                if "api" in pod_name or "app" in pod_name or "frontend" in pod_name:
+                    if "backend-api" in self.configmaps or "db-config" in self.configmaps:
+                        self.pods_fixed.add(pod_name)
+
+        return "manifest applied"
+
+    def delete_resource(self, kind: str, name: str) -> str:
+        """Simulate deleting a resource."""
+        if kind == "pod":
+            self.pods_deleted.add(name)
+        return f"{kind}/{name} deleted"
+
+    def get_pod_phase(self, pod_name: str) -> str:
+        """Get simulated pod phase."""
+        if pod_name == "backend-api":
+            if "db-config" in self.configmaps:
+                return "Running"
+            return "CrashLoopBackOff"
+        elif pod_name == "memory-app":
+            return "OOMKilled"
+        elif pod_name in ("db-primary", "api-service", "frontend"):
+            return "CrashLoopBackOff"
+        return "Unknown"
+
+
+# Global simulation state
+SIM_STATE = SimState()
+
+
 @dataclass
 class EnvConfig:
     """Configuration for the SRE Gym environment."""
@@ -84,6 +169,10 @@ class SREGymEnv:
                     If provided, overrides the configured task_difficulty.
         """
         self._reward_engine.reset()
+
+        # Reset simulation state if not using kubectl
+        if not KUBECTL_AVAILABLE:
+            SIM_STATE.reset()
 
         # Support task_id from OpenEnv validator
         if task_id and task_id in ("easy", "medium", "hard"):
@@ -157,6 +246,10 @@ class SREGymEnv:
 
     def _execute_action(self, action: K8sAction) -> str:
         """Execute a kubectl action and return output."""
+        # Use simulation mode if kubectl not available
+        if not KUBECTL_AVAILABLE:
+            return self._execute_action_sim(action)
+
         cmd = ["kubectl"]
         match action.action_type.value:
             case "apply_manifest":
@@ -227,8 +320,31 @@ class SREGymEnv:
             case _:
                 return f"Unknown action type: {action.action_type}"
 
+    def _execute_action_sim(self, action: K8sAction) -> str:
+        """Execute action in simulation mode (when kubectl unavailable)."""
+        match action.action_type.value:
+            case "apply_manifest":
+                if not action.manifest:
+                    return "Error: No manifest"
+                return SIM_STATE.apply_manifest(action.manifest)
+
+            case "delete_resource":
+                if not action.resource_kind or not action.resource_name:
+                    return "Error: resource_kind and resource_name required"
+                return SIM_STATE.delete_resource(action.resource_kind, action.resource_name)
+
+            case "noop":
+                return "No-op: agent chose to wait and observe"
+
+            case _:
+                return f"Action {action.action_type.value} simulated"
+
     def _cleanup(self) -> None:
         """Remove pods/resources from previous episode using label selectors."""
+        if not KUBECTL_AVAILABLE:
+            # Skip cleanup if kubectl not available
+            return
+
         # Delete pods created by SRE Gym tasks using label selector
         subprocess.run(
             ["kubectl", "delete", "pods", "-n", "default", "-l", "sre-gym-task=true", "--ignore-not-found"],

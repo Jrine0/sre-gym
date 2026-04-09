@@ -7,6 +7,22 @@ import subprocess
 from dataclasses import dataclass
 
 
+def _check_kubectl() -> bool:
+    """Check if kubectl is available."""
+    try:
+        result = subprocess.run(
+            ["kubectl", "cluster-info"],
+            capture_output=True,
+            timeout=5,
+        )
+        return result.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+
+
+KUBECTL_AVAILABLE = _check_kubectl()
+
+
 @dataclass
 class AssertionResult:
     """Result of an assertion check."""
@@ -38,6 +54,15 @@ class AssertionEngine:
 
     def get_pod_phase(self, pod_name: str) -> str | None:
         """Get current phase of a pod."""
+        if not KUBECTL_AVAILABLE:
+            # Return simulated phase
+            if pod_name == "backend-api":
+                from sre_gym.env import SIM_STATE
+                if "db-config" in SIM_STATE.configmaps:
+                    return "Running"
+                return "CrashLoopBackOff"
+            return "CrashLoopBackOff"
+
         _, stdout, _ = self._kubectl([
             "get", "pod", pod_name, "-o", "jsonpath={.status.phase}"
         ])
@@ -45,6 +70,9 @@ class AssertionEngine:
 
     def get_pod_status_json(self, pod_name: str) -> dict:
         """Get full pod status as JSON."""
+        if not KUBECTL_AVAILABLE:
+            return {"status": {"phase": self.get_pod_phase(pod_name)}}
+
         _, stdout, stderr = self._kubectl([
             "get", "pod", pod_name, "-o", "json"
         ])
@@ -57,6 +85,13 @@ class AssertionEngine:
 
     def get_event_message(self, pod_name: str) -> str | None:
         """Get most recent event for pod."""
+        if not KUBECTL_AVAILABLE:
+            if pod_name == "backend-api":
+                from sre_gym.env import SIM_STATE
+                if "db-config" not in SIM_STATE.configmaps:
+                    return "Error: couldn't find configmap: configmap/db-config not found"
+            return "Waiting for pod events"
+
         _, stdout, _ = self._kubectl([
             "get", "events",
             "--sort-by=.lastTimestamp",
@@ -66,6 +101,9 @@ class AssertionEngine:
 
     def count_running_pods(self, label_selector: str = "") -> int:
         """Count pods currently in Running state."""
+        if not KUBECTL_AVAILABLE:
+            return 0
+
         args = ["get", "pods", "-o", "jsonpath={.items[*].status.phase}"]
         if label_selector:
             args.extend(["-l", label_selector])
@@ -76,6 +114,9 @@ class AssertionEngine:
 
     def count_total_pods(self, label_selector: str = "") -> int:
         """Count total pods matching selector."""
+        if not KUBECTL_AVAILABLE:
+            return 1
+
         args = ["get", "pods"]
         if label_selector:
             args.extend(["-l", label_selector])
