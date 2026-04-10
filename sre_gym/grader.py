@@ -20,7 +20,16 @@ def _check_kubectl() -> bool:
         return False
 
 
-KUBECTL_AVAILABLE = _check_kubectl()
+# Check at module load - do this lazily to avoid circular imports
+_kubectl_check_done = False
+_kubectl_available = False
+
+def _get_kubectl_available() -> bool:
+    global _kubectl_check_done, _kubectl_available
+    if not _kubectl_check_done:
+        _kubectl_available = _check_kubectl()
+        _kubectl_check_done = True
+    return _kubectl_available
 
 
 @dataclass
@@ -54,7 +63,7 @@ class AssertionEngine:
 
     def get_pod_phase(self, pod_name: str) -> str | None:
         """Get current phase of a pod."""
-        if not KUBECTL_AVAILABLE:
+        if not _get_kubectl_available():
             # Return simulated phase
             if pod_name == "backend-api":
                 from sre_gym.env import SIM_STATE
@@ -70,7 +79,7 @@ class AssertionEngine:
 
     def get_pod_status_json(self, pod_name: str) -> dict:
         """Get full pod status as JSON."""
-        if not KUBECTL_AVAILABLE:
+        if not _get_kubectl_available():
             return {"status": {"phase": self.get_pod_phase(pod_name)}}
 
         _, stdout, stderr = self._kubectl([
@@ -85,7 +94,7 @@ class AssertionEngine:
 
     def get_event_message(self, pod_name: str) -> str | None:
         """Get most recent event for pod."""
-        if not KUBECTL_AVAILABLE:
+        if not _get_kubectl_available():
             if pod_name == "backend-api":
                 from sre_gym.env import SIM_STATE
                 if "db-config" not in SIM_STATE.configmaps:
@@ -101,7 +110,7 @@ class AssertionEngine:
 
     def count_running_pods(self, label_selector: str = "") -> int:
         """Count pods currently in Running state."""
-        if not KUBECTL_AVAILABLE:
+        if not _get_kubectl_available():
             return 0
 
         args = ["get", "pods", "-o", "jsonpath={.items[*].status.phase}"]
@@ -114,7 +123,7 @@ class AssertionEngine:
 
     def count_total_pods(self, label_selector: str = "") -> int:
         """Count total pods matching selector."""
-        if not KUBECTL_AVAILABLE:
+        if not _get_kubectl_available():
             return 1
 
         args = ["get", "pods"]

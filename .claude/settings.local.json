@@ -19,7 +19,10 @@
       "WebFetch(domain:www.gradio.app)",
       "WebFetch(domain:github.com)",
       "Bash(uv lock:*)",
-      "Bash(python -c \"from sre_gym.env import SREGymEnv, EnvConfig, KUBECTL_AVAILABLE, SIM_STATE; print\\(f''kubectl available: {KUBECTL_AVAILABLE}''\\); env = SREGymEnv\\(EnvConfig\\(task_difficulty=''easy''\\)\\); obs = env.reset\\(\\); print\\(f''Reset OK: {obs.pod_status}''\\)\")"
+      "Bash(python -c \"from sre_gym.env import SREGymEnv, EnvConfig, KUBECTL_AVAILABLE, SIM_STATE; print\\(f''kubectl available: {KUBECTL_AVAILABLE}''\\); env = SREGymEnv\\(EnvConfig\\(task_difficulty=''easy''\\)\\); obs = env.reset\\(\\); print\\(f''Reset OK: {obs.pod_status}''\\)\")",
+      "Bash(python inference.py --task easy --episodes 3 --max-steps 5)",
+      "Bash(python -c \"from sre_gym.env import SREGymEnv, EnvConfig; env = SREGymEnv\\(EnvConfig\\(task_difficulty=''easy''\\)\\); obs = env.reset\\(\\); print\\(f''OK: {obs.pod_status}''\\)\")",
+      "Bash(python inference.py --task easy --episodes 1 --max-steps 3)"
     ]
   }
 }
