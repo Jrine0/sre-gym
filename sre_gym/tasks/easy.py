@@ -89,20 +89,26 @@ class EasyTask:
         """Set up the broken state: apply broken manifest, delete ConfigMap."""
         import subprocess
 
-        # Apply broken pod (might already exist)
-        broken = get_broken_manifest(self.config)
-        proc = subprocess.run(
-            ["kubectl", "apply", "-f", "-"],
-            input=broken,
+        # Only run kubectl commands if available
+        if subprocess.run(
+            ["kubectl", "cluster-info"],
             capture_output=True,
-            text=True,
-        )
-        # Delete the ConfigMap to ensure it's missing
-        subprocess.run(
-            ["kubectl", "delete", "configmap", "db-config", "-n", "default", "--ignore-not-found"],
-            capture_output=True,
-        )
-        time.sleep(2)  # Allow pod to start crashing
+            timeout=5,
+        ).returncode == 0:
+            # Apply broken pod (might already exist)
+            broken = get_broken_manifest(self.config)
+            subprocess.run(
+                ["kubectl", "apply", "-f", "-"],
+                input=broken,
+                capture_output=True,
+                text=True,
+            )
+            # Delete the ConfigMap to ensure it's missing
+            subprocess.run(
+                ["kubectl", "delete", "configmap", "db-config", "-n", "default", "--ignore-not-found"],
+                capture_output=True,
+            )
+            time.sleep(2)  # Allow pod to start crashing
 
         state = K8sState(
             healthy_pods=0,

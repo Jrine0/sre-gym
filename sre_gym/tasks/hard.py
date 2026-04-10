@@ -113,19 +113,26 @@ class HardTask:
         """Set up cascading failure state."""
         import subprocess
 
-        # Delete existing pods by name (kubectl delete -f - with manifest input doesn't work for deletion)
-        for pod in ["db-primary", "api-service", "frontend"]:
-            subprocess.run(
-                ["kubectl", "delete", "pod", pod, "-n", "default", "--ignore-not-found"],
-                capture_output=True,
-            )
-        subprocess.run(
-            ["kubectl", "apply", "-f", "-"],
-            input=get_cascading_manifest(),
+        # Only run kubectl commands if available
+        if subprocess.run(
+            ["kubectl", "cluster-info"],
             capture_output=True,
-            text=True,
-        )
-        time.sleep(5)
+            timeout=5,
+        ).returncode == 0:
+            # Delete existing pods by name (kubectl delete -f - with manifest input doesn't work for deletion)
+            for pod in ["db-primary", "api-service", "frontend"]:
+                subprocess.run(
+                    ["kubectl", "delete", "pod", pod, "-n", "default", "--ignore-not-found"],
+                    capture_output=True,
+                )
+            subprocess.run(
+                ["kubectl", "apply", "-f", "-"],
+                input=get_cascading_manifest(),
+                capture_output=True,
+                text=True,
+            )
+            time.sleep(5)
+
         self._start_time = time.time()
 
         state = K8sState(

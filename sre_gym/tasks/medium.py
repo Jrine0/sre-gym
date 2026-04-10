@@ -65,18 +65,24 @@ class MediumTask:
         """Set up broken state: apply pod with too-low memory limit."""
         import subprocess
 
-        manifest = get_oom_manifest("64Mi")
-        subprocess.run(
-            ["kubectl", "delete", "pod", "memory-app", "--ignore-not-found"],
+        # Only run kubectl commands if available
+        if subprocess.run(
+            ["kubectl", "cluster-info"],
             capture_output=True,
-        )
-        subprocess.run(
-            ["kubectl", "apply", "-f", "-"],
-            input=manifest,
-            capture_output=True,
-            text=True,
-        )
-        time.sleep(3)  # Allow stress workload to consume memory
+            timeout=5,
+        ).returncode == 0:
+            manifest = get_oom_manifest("64Mi")
+            subprocess.run(
+                ["kubectl", "delete", "pod", "memory-app", "--ignore-not-found"],
+                capture_output=True,
+            )
+            subprocess.run(
+                ["kubectl", "apply", "-f", "-"],
+                input=manifest,
+                capture_output=True,
+                text=True,
+            )
+            time.sleep(3)  # Allow stress workload to consume memory
 
         state = K8sState(
             healthy_pods=0,
