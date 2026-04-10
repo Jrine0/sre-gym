@@ -33,70 +33,224 @@ KUBECTL_AVAILABLE = _check_kubectl_available()
 
 
 class SimState:
-    """Simulates K8s state when kubectl is not available."""
+    """Standalone simulation state — zero external dependencies.
+
+    When kubectl is unavailable, this class handles ALL environment logic:
+    action execution, state evaluation, and observation generation.
+    No task objects, no grader imports, no subprocess calls.
+    """
 
     def __init__(self):
         self.configmaps: set[str] = set()
-        self.pods_fixed: set[str] = set()
         self.pods_deleted: set[str] = set()
+        self.task_difficulty: str = "easy"
+        self._total_pods: int = 1
+        self._failed_pods: list[str] = []
+        # Track what pods have been applied (keyed by pod name)
+        self._pod_manifests: dict[str, dict] = {}
 
-    def reset(self):
+    def reset(self, difficulty: str) -> None:
+        """Reset simulation for the given difficulty.
+
+        Sets up the broken initial state that the agent must fix.
+        """
         self.configmaps.clear()
-        self.pods_fixed.clear()
         self.pods_deleted.clear()
+        self._pod_manifests.clear()
+        self.task_difficulty = difficulty
+
+        if difficulty == "easy":
+            self._total_pods = 1
+            self._failed_pods = ["backend-api"]
+        elif difficulty == "medium":
+            self._total_pods = 1
+            self._failed_pods = ["memory-app"]
+            # memory-app starts with 64Mi limit (too low, causes OOM)
+            self._pod_manifests["memory-app"] = {"memory_limit": "64Mi"}
+        elif difficulty == "hard":
+            self._total_pods = 3
+            self._failed_pods = ["db-primary", "api-service", "frontend"]
+        else:
+            self._total_pods = 1
+            self._failed_pods = ["backend-api"]
+
+    def _parse_memory_limit(self, manifest: str) -> str | None:
+        """Extract memory limit from a pod manifest, or None if not found."""
+        lines = manifest.split("\n")
+        for i, line in enumerate(lines):
+            line = line.strip()
+            if line.startswith("memory:"):
+                # e.g. "memory: 256Mi" or "memory: \"256Mi\""
+                parts = line.split(":", 1)[1].strip().strip('"').strip("'")
+                return parts
+        return None
 
     def apply_manifest(self, manifest: str) -> str:
-        """Simulate applying a manifest."""
+        """Execute apply_manifest in simulation mode."""
         if not manifest:
-            return "Error: No manifest"
+            return "Error: No manifest provided"
 
         lines = manifest.split("\n")
-        in_configmap = False
-        cm_name = None
-
+        created = []
         for line in lines:
             line = line.strip()
-            if line == "---":
-                in_configmap = False
-                cm_name = None
+            if not line or line.startswith("#"):
+                continue
             if line.startswith("kind:"):
-                if "ConfigMap" in line:
-                    in_configmap = True
-            if line.startswith("name:") and in_configmap and cm_name is None:
-                cm_name = line.split("name:")[1].strip()
-                self.configmaps.add(cm_name)
-                return f"configmap/{cm_name} created"
+                kind = line.split(":", 1)[1].strip()
+                idx = lines.index(line)
 
-        # Check for pod names
-        for line in lines:
-            if line.startswith("name:"):
-                pod_name = line.split("name:")[1].strip()
-                if "api" in pod_name or "app" in pod_name or "frontend" in pod_name:
-                    if "backend-api" in self.configmaps or "db-config" in self.configmaps:
-                        self.pods_fixed.add(pod_name)
+                if kind == "ConfigMap":
+                    for j in range(idx + 1, min(idx + 10, len(lines))):
+                        name_line = lines[j].strip()
+                        if name_line.startswith("name:"):
+                            cm_name = name_line.split(":", 1)[1].strip()
+                            self.configmaps.add(cm_name)
+                            created.append(f"configmap/{cm_name} created")
+                            break
 
+                elif kind == "Pod":
+                    pod_name = None
+                    memory_limit = None
+                    for j in range(idx + 1, min(idx + 20, len(lines))):
+                        name_line = lines[j].strip()
+                        if name_line.startswith("name:"):
+                            pod_name = name_line.split(":", 1)[1].strip()
+                        elif "memory" in name_line and memory_limit is None:
+                            memory_limit = self._parse_memory_limit(name_line)
+                    if pod_name:
+                        # Update manifest for this pod
+                        self._pod_manifests[pod_name] = {"memory_limit": memory_limit}
+                        # Remove from deleted list (pod will be re-created)
+                        self.pods_deleted.discard(pod_name)
+                        created.append(f"pod/{pod_name} created")
+
+        if created:
+            return "\n".join(created)
         return "manifest applied"
 
     def delete_resource(self, kind: str, name: str) -> str:
-        """Simulate deleting a resource."""
+        """Execute delete_resource in simulation mode."""
         if kind == "pod":
             self.pods_deleted.add(name)
         return f"{kind}/{name} deleted"
 
+    def scale_deployment(self, name: str, replicas: int) -> str:
+        """Execute scale_deployment in simulation mode."""
+        return f"deployment.apps/{name} scaled"
+
+    def exec_command(self, name: str, command: list[str]) -> str:
+        """Execute exec_command in simulation mode."""
+        return f"exec completed on {name}: {' '.join(command)}"
+
     def get_pod_phase(self, pod_name: str) -> str:
-        """Get simulated pod phase."""
-        if pod_name == "backend-api":
-            if "db-config" in self.configmaps:
-                return "Running"
-            return "CrashLoopBackOff"
-        elif pod_name == "memory-app":
-            return "OOMKilled"
-        elif pod_name in ("db-primary", "api-service", "frontend"):
-            return "CrashLoopBackOff"
-        return "Unknown"
+        """Return simulated pod phase based on task and current state."""
+        if pod_name in self.pods_deleted:
+            return "Terminating"
+
+        if self.task_difficulty == "easy":
+            if pod_name == "backend-api":
+                return "Running" if "db-config" in self.configmaps else "CrashLoopBackOff"
+        elif self.task_difficulty == "medium":
+            if pod_name == "memory-app":
+                manifest = self._pod_manifests.get(pod_name, {})
+                limit = manifest.get("memory_limit", "64Mi")
+                if limit and self._memory_ok(limit):
+                    return "Running"
+                return "OOMKilled"
+        elif self.task_difficulty == "hard":
+            phases = {
+                "db-primary": "CrashLoopBackOff",
+                "api-service": "CrashLoopBackOff",
+                "frontend": "CrashLoopBackOff",
+            }
+            return phases.get(pod_name, "Unknown")
+
+        return "Running"
+
+    def _memory_ok(self, limit: str) -> bool:
+        """Check if memory limit is sufficient (>64Mi counts as OK)."""
+        if not limit:
+            return False
+        import re
+        m = re.match(r"(\d+)(Mi|Gi)", limit)
+        if not m:
+            return False
+        value, unit = int(m.group(1)), m.group(2)
+        if unit == "Gi":
+            value *= 1024
+        return value > 64
+
+    def evaluate(self, step_number: int) -> tuple[bool, K8sObservation]:
+        """Evaluate current simulation state and return (done, observation).
+
+        This replaces all task.evaluate() calls when kubectl is unavailable.
+        """
+        difficulty = self.task_difficulty
+
+        if difficulty == "easy":
+            phase = self.get_pod_phase("backend-api")
+            healthy = 1 if phase == "Running" else 0
+            is_success = healthy == 1
+            done = is_success or step_number >= 15
+            kubectl_output = f"Pod backend-api is {phase}"
+            error_msg = None
+            if not is_success:
+                if "db-config" not in self.configmaps:
+                    error_msg = "ConfigMap 'db-config' not found. Create it with kubectl create configmap."
+                else:
+                    error_msg = f"Pod backend-api is {phase}. Check events for details."
+            health_score = healthy / self._total_pods
+            pod_status = phase
+
+        elif difficulty == "medium":
+            phase = self.get_pod_phase("memory-app")
+            healthy = 1 if phase == "Running" else 0
+            is_success = healthy == 1
+            done = is_success or step_number >= 20
+            kubectl_output = f"Pod memory-app is {phase}"
+            error_msg = None
+            if not is_success:
+                if phase == "OOMKilled":
+                    error_msg = "Pod OOMKilled. Increase memory limit: use 'Mi' not 'MB'. Example: limits.memory: 256Mi"
+                else:
+                    error_msg = f"Pod memory-app is {phase}. Check resource limits."
+            health_score = healthy / self._total_pods
+            pod_status = phase
+
+        elif difficulty == "hard":
+            phases = {name: self.get_pod_phase(name) for name in ["db-primary", "api-service", "frontend"]}
+            healthy_count = sum(1 for p in phases.values() if p == "Running")
+            is_success = healthy_count == 3
+            done = is_success or step_number >= 30
+            kubectl_output = str(phases)
+            error_msg = None
+            if not is_success:
+                if phases.get("db-primary") != "Running":
+                    error_msg = "Root cause: DB pod CrashLoopBackOff. Increase memory/cpu limits."
+                elif phases.get("api-service") != "Running":
+                    error_msg = "API service unhealthy. Check DB connectivity."
+            health_score = healthy_count / self._total_pods
+            pod_status = ", ".join(f"{k}={v}" for k, v in phases.items())
+        else:
+            is_success = False
+            done = step_number >= 15
+            kubectl_output = "Unknown task"
+            error_msg = "Unknown task difficulty"
+            health_score = 0.0
+            pod_status = "Unknown"
+
+        obs = K8sObservation(
+            kubectl_output=kubectl_output,
+            error_message=error_msg,
+            pod_status=pod_status,
+            health_score=health_score,
+            step_number=step_number,
+        )
+        return done, obs
 
 
-# Global simulation state
+# Global simulation state — single instance
 SIM_STATE = SimState()
 
 
@@ -131,48 +285,37 @@ class SREGymEnv:
 
     def __init__(self, config: EnvConfig | None = None):
         self.config = config or EnvConfig()
+        # Always validate difficulty — this ensures ValueError is raised even
+        # in simulation mode (when kubectl is unavailable and we skip task creation)
+        if self.config.task_difficulty not in ("easy", "medium", "hard"):
+            raise ValueError(
+                f"Unknown difficulty: {self.config.task_difficulty}. "
+                "Use: easy | medium | hard"
+            )
+        # In simulation mode, task/grader are not needed — reset() handles everything.
+        # Only create them when kubectl is available.
         self._task_instance: EasyTask | MediumTask | HardTask | None = None
         self._grader: AssertionEngine | None = None
-        self._reward_engine: PBRSEngine | None = None
         self._state: K8sState | None = None
         self._episode_start: float | None = None
-        self._init_task()
 
-    def _init_task(self) -> None:
-        """Initialize task, grader, and reward engine with full error handling."""
-        import sys
-        import traceback as _tb
-
-        try:
-            self._task_instance = self._create_task()
-        except ValueError:
-            # Re-raise ValueError — it's a user input validation error
-            raise
-        except BaseException as e:
-            sys.stderr.write(f"[SREGym] _create_task failed: {type(e).__name__}: {e}\n")
-            _tb.print_exc(file=sys.stderr)
-            # Use EasyTask as guaranteed fallback
-            self._task_instance = EasyTask(EasyTaskConfig())
-
-        try:
-            self._grader = AssertionEngine(namespace=self.config.namespace)
-        except BaseException as e:
-            sys.stderr.write(f"[SREGym] AssertionEngine init failed: {type(e).__name__}: {e}\n")
-            _tb.print_exc(file=sys.stderr)
-            self._grader = None
-
-        try:
-            self._reward_engine = PBRSEngine(
-                PBRSConfig(
-                    alpha=self.config.shaping_alpha,
-                    gamma=self.config.shaping_gamma,
-                    penalty_per_step=self.config.penalty_per_step,
-                )
+        # PBRS engine — lightweight, no external deps, always safe to init
+        self._reward_engine = PBRSEngine(
+            PBRSConfig(
+                alpha=self.config.shaping_alpha,
+                gamma=self.config.shaping_gamma,
+                penalty_per_step=self.config.penalty_per_step,
             )
-        except BaseException as e:
-            sys.stderr.write(f"[SREGym] PBRSEngine init failed: {type(e).__name__}: {e}\n")
-            _tb.print_exc(file=sys.stderr)
-            self._reward_engine = None
+        )
+
+        # Task/grader only needed for real cluster mode
+        if KUBECTL_AVAILABLE:
+            self._init_kubectl_mode()
+
+    def _init_kubectl_mode(self) -> None:
+        """Initialize task and grader (only when kubectl is available)."""
+        self._task_instance = self._create_task()
+        self._grader = AssertionEngine(namespace=self.config.namespace)
 
     def _create_task(self) -> EasyTask | MediumTask | HardTask:
         """Instantiate the appropriate task based on difficulty."""
@@ -195,66 +338,59 @@ class SREGymEnv:
     def reset(self, task_id: str | None = None) -> K8sObservation:
         """Reset environment to initial state, return first observation.
 
-        Args:
-            task_id: Optional task identifier (easy/medium/hard) for OpenEnv API.
-                    If provided, overrides the configured task_difficulty.
+        When kubectl is unavailable, uses fully-standalone simulation mode with
+        zero external dependencies.
         """
-        import sys
-        import traceback as _tb
+        # Override difficulty if task_id provided
+        if task_id and task_id in ("easy", "medium", "hard"):
+            self.config.task_difficulty = task_id
 
-        try:
-            self._reward_engine.reset()
+        difficulty = self.config.task_difficulty
 
-            # Reset simulation state if not using kubectl
-            if not KUBECTL_AVAILABLE:
-                SIM_STATE.reset()
+        # --- SIMULATION MODE (kubectl unavailable) ---
+        if not KUBECTL_AVAILABLE:
+            self._episode_start = time.time()
 
-            # Support task_id from OpenEnv validator
-            if task_id and task_id in ("easy", "medium", "hard"):
-                self.config.task_difficulty = task_id
-                self._task_instance = self._create_task()
+            # Reset simulation state for this difficulty
+            SIM_STATE.reset(difficulty)
 
-            # Clean up any existing pods from previous episode
-            self._cleanup()
-            time.sleep(1)
-
-            # Set up the task / simulation state
-            self._state = self._task_instance.setup()
-
-        except BaseException as e:
-            # Catch EVERYTHING — SystemExit, KeyboardInterrupt, any error.
-            # Log it so we know what went wrong in the validator.
-            sys.stderr.write(f"[SREGym] reset() setup failed: {type(e).__name__}: {e}\n")
-            sys.stderr.write("[SREGym] Traceback:\n")
-            _tb.print_exc(file=sys.stderr)
-            sys.stderr.write("[SREGym] Falling back to simulation state.\n")
-            # Fallback state
+            # Set up internal state matching simulation
             self._state = K8sState(
                 healthy_pods=0,
-                total_pods=1,
-                failed_pods=["backend-api"],
+                total_pods=SIM_STATE._total_pods,
+                failed_pods=list(SIM_STATE._failed_pods),
                 penalties_accumulated=0.0,
+                episode_start_ts=self._episode_start,
                 step_number=0,
             )
 
+            # Evaluate initial broken state
+            done, obs = SIM_STATE.evaluate(0)
+
+            # Reset PBRS engine
+            if self._reward_engine is not None:
+                self._reward_engine.reset()
+
+            obs.step_number = 0
+            return obs
+
+        # --- KUBECTL MODE (real cluster) ---
+        if self._reward_engine is not None:
+            self._reward_engine.reset()
+
+        # Recreate task if difficulty changed
+        if task_id and task_id in ("easy", "medium", "hard"):
+            self._task_instance = self._create_task()
+
+        # Clean up previous episode
+        self._cleanup()
+        time.sleep(1)
+
+        self._state = self._task_instance.setup()
         self._episode_start = time.time()
         self._state.episode_start_ts = self._episode_start
 
-        # Evaluate the initial state
-        try:
-            _, obs = self._task_instance.evaluate(self._state)
-        except BaseException as e:
-            sys.stderr.write(f"[SREGym] reset() evaluate failed: {type(e).__name__}: {e}\n")
-            _tb.print_exc(file=sys.stderr)
-            sys.stderr.write("[SREGym] Falling back to default observation.\n")
-            obs = K8sObservation(
-                kubectl_output=f"Simulation mode — kubectl unavailable",
-                error_message="Pod backend-api is CrashLoopBackOff. ConfigMap 'db-config' not found.",
-                pod_status="CrashLoopBackOff",
-                health_score=0.0,
-                step_number=0,
-            )
-
+        _, obs = self._task_instance.evaluate(self._state)
         obs.step_number = 0
         self._state.step_number = 0
         return obs
@@ -268,58 +404,72 @@ class SREGymEnv:
         Returns:
             (observation, reward, done, info)
         """
-        import sys
-        import traceback as _tb
-
         if self._state is None:
             raise RuntimeError("Must call reset() before step()")
 
         step_number = self._state.step_number + 1
         self._state.step_number = step_number
 
-        # Execute action
+        # --- SIMULATION MODE ---
+        if not KUBECTL_AVAILABLE:
+            kubectl_output = self._execute_action_sim(action)
+            time.sleep(0.1)
+
+            # Evaluate using simulation state
+            done, obs = SIM_STATE.evaluate(step_number)
+
+            # Update internal state
+            self._state.healthy_pods = 1 if obs.health_score >= 1.0 else 0
+            self._state.failed_pods = [] if obs.health_score >= 1.0 else list(SIM_STATE._failed_pods)
+
+            # Compute PBRS reward
+            if self._reward_engine is not None:
+                reward_breakdown = self._reward_engine.compute_reward(
+                    healthy_pods=self._state.healthy_pods,
+                    total_pods=self._state.total_pods,
+                    is_terminal=done,
+                    is_success=obs.health_score >= 1.0,
+                )
+            else:
+                reward_breakdown = RewardBreakdown(
+                    shaping_reward=0.0,
+                    step_penalty=-0.05,
+                    sparse_reward=1.0 if done and obs.health_score >= 1.0 else 0.0,
+                    total=1.0 if done and obs.health_score >= 1.0 else -0.05,
+                )
+
+            self._state.penalties_accumulated += abs(reward_breakdown.step_penalty)
+            obs.step_number = step_number
+            obs.kubectl_output = kubectl_output
+
+            info = {
+                "reward_breakdown": reward_breakdown.to_dict(),
+                "state": {
+                    "healthy_pods": self._state.healthy_pods,
+                    "total_pods": self._state.total_pods,
+                    "penalties": self._state.penalties_accumulated,
+                },
+            }
+            return obs, reward_breakdown.total, done, info
+
+        # --- KUBECTL MODE ---
         kubectl_output = self._execute_action(action)
         time.sleep(1)
 
-        # Evaluate state — wrap defensively
-        try:
-            done, obs = self._task_instance.evaluate(self._state)
-        except BaseException as e:
-            sys.stderr.write(f"[SREGym] step evaluate failed: {type(e).__name__}: {e}\n")
-            _tb.print_exc(file=sys.stderr)
-            obs = K8sObservation(
-                kubectl_output=kubectl_output,
-                pod_status="Unknown",
-                health_score=0.0,
-                step_number=step_number,
-            )
-            done = False
+        done, obs = self._task_instance.evaluate(self._state)
 
         # Update internal state
         self._state.healthy_pods = 1 if obs.health_score >= 1.0 else 0
         self._state.failed_pods = [] if obs.health_score >= 1.0 else self._state.failed_pods
 
-        # Compute PBRS reward — wrap defensively
-        try:
-            reward_breakdown = self._reward_engine.compute_reward(
-                healthy_pods=self._state.healthy_pods,
-                total_pods=self._state.total_pods,
-                is_terminal=done,
-                is_success=obs.health_score >= 1.0,
-            )
-        except BaseException as e:
-            sys.stderr.write(f"[SREGym] step reward failed: {type(e).__name__}: {e}\n")
-            _tb.print_exc(file=sys.stderr)
-            reward_breakdown = RewardBreakdown(
-                shaping_reward=0.0,
-                step_penalty=-0.05,
-                sparse_reward=0.0,
-                total=0.0,
-            )
+        reward_breakdown = self._reward_engine.compute_reward(
+            healthy_pods=self._state.healthy_pods,
+            total_pods=self._state.total_pods,
+            is_terminal=done,
+            is_success=obs.health_score >= 1.0,
+        )
 
-        # Apply step penalty
         self._state.penalties_accumulated += abs(reward_breakdown.step_penalty)
-
         obs.step_number = step_number
         obs.kubectl_output = kubectl_output
 
@@ -422,6 +572,13 @@ class SREGymEnv:
                 if not action.resource_kind or not action.resource_name:
                     return "Error: resource_kind and resource_name required"
                 return SIM_STATE.delete_resource(action.resource_kind, action.resource_name)
+
+            case "scale_deployment":
+                replicas = action.options.get("replicas", 1) if action.options else 1
+                return SIM_STATE.scale_deployment(action.resource_name or "", replicas)
+
+            case "exec_command":
+                return SIM_STATE.exec_command(action.resource_name or "", action.command or [])
 
             case "noop":
                 return "No-op: agent chose to wait and observe"
