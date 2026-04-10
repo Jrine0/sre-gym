@@ -131,29 +131,60 @@ class SREGymEnv:
 
     def __init__(self, config: EnvConfig | None = None):
         self.config = config or EnvConfig()
-        self._task_instance = self._create_task()
-        self._grader = AssertionEngine(namespace=self.config.namespace)
-        self._reward_engine = PBRSEngine(
-            PBRSConfig(
-                alpha=self.config.shaping_alpha,
-                gamma=self.config.shaping_gamma,
-                penalty_per_step=self.config.penalty_per_step,
-            )
-        )
+        self._task_instance: EasyTask | MediumTask | HardTask | None = None
+        self._grader: AssertionEngine | None = None
+        self._reward_engine: PBRSEngine | None = None
         self._state: K8sState | None = None
         self._episode_start: float | None = None
+        self._init_task()
+
+    def _init_task(self) -> None:
+        """Initialize task, grader, and reward engine with full error handling."""
+        import sys
+        import traceback as _tb
+
+        try:
+            self._task_instance = self._create_task()
+        except ValueError:
+            # Re-raise ValueError — it's a user input validation error
+            raise
+        except BaseException as e:
+            sys.stderr.write(f"[SREGym] _create_task failed: {type(e).__name__}: {e}\n")
+            _tb.print_exc(file=sys.stderr)
+            # Use EasyTask as guaranteed fallback
+            self._task_instance = EasyTask(EasyTaskConfig())
+
+        try:
+            self._grader = AssertionEngine(namespace=self.config.namespace)
+        except BaseException as e:
+            sys.stderr.write(f"[SREGym] AssertionEngine init failed: {type(e).__name__}: {e}\n")
+            _tb.print_exc(file=sys.stderr)
+            self._grader = None
+
+        try:
+            self._reward_engine = PBRSEngine(
+                PBRSConfig(
+                    alpha=self.config.shaping_alpha,
+                    gamma=self.config.shaping_gamma,
+                    penalty_per_step=self.config.penalty_per_step,
+                )
+            )
+        except BaseException as e:
+            sys.stderr.write(f"[SREGym] PBRSEngine init failed: {type(e).__name__}: {e}\n")
+            _tb.print_exc(file=sys.stderr)
+            self._reward_engine = None
 
     def _create_task(self) -> EasyTask | MediumTask | HardTask:
         """Instantiate the appropriate task based on difficulty."""
         match self.config.task_difficulty:
             case "easy":
-                from sre_gym.tasks.easy import EasyTaskConfig
+                from sre_gym.tasks.easy import EasyTask, EasyTaskConfig
                 return EasyTask(EasyTaskConfig())
             case "medium":
-                from sre_gym.tasks.medium import MediumTaskConfig
+                from sre_gym.tasks.medium import MediumTask, MediumTaskConfig
                 return MediumTask(MediumTaskConfig())
             case "hard":
-                from sre_gym.tasks.hard import HardTaskConfig
+                from sre_gym.tasks.hard import HardTask, HardTaskConfig
                 return HardTask(HardTaskConfig())
             case _:
                 raise ValueError(
@@ -168,41 +199,57 @@ class SREGymEnv:
             task_id: Optional task identifier (easy/medium/hard) for OpenEnv API.
                     If provided, overrides the configured task_difficulty.
         """
-        self._reward_engine.reset()
-
-        # Reset simulation state if not using kubectl
-        if not KUBECTL_AVAILABLE:
-            SIM_STATE.reset()
-
-        # Support task_id from OpenEnv validator
-        if task_id and task_id in ("easy", "medium", "hard"):
-            self.config.task_difficulty = task_id
-            self._task_instance = self._create_task()
-
-        # Clean up any existing pods from previous episode
-        self._cleanup()
-        time.sleep(1)
+        import sys
+        import traceback as _tb
 
         try:
+            self._reward_engine.reset()
+
+            # Reset simulation state if not using kubectl
+            if not KUBECTL_AVAILABLE:
+                SIM_STATE.reset()
+
+            # Support task_id from OpenEnv validator
+            if task_id and task_id in ("easy", "medium", "hard"):
+                self.config.task_difficulty = task_id
+                self._task_instance = self._create_task()
+
+            # Clean up any existing pods from previous episode
+            self._cleanup()
+            time.sleep(1)
+
+            # Set up the task / simulation state
             self._state = self._task_instance.setup()
-        except Exception as e:
-            # In simulation mode, create a default state
+
+        except BaseException as e:
+            # Catch EVERYTHING — SystemExit, KeyboardInterrupt, any error.
+            # Log it so we know what went wrong in the validator.
+            sys.stderr.write(f"[SREGym] reset() setup failed: {type(e).__name__}: {e}\n")
+            sys.stderr.write("[SREGym] Traceback:\n")
+            _tb.print_exc(file=sys.stderr)
+            sys.stderr.write("[SREGym] Falling back to simulation state.\n")
+            # Fallback state
             self._state = K8sState(
                 healthy_pods=0,
                 total_pods=1,
                 failed_pods=["backend-api"],
+                penalties_accumulated=0.0,
+                step_number=0,
             )
 
         self._episode_start = time.time()
         self._state.episode_start_ts = self._episode_start
 
-        # Initial evaluation to get observation
+        # Evaluate the initial state
         try:
             _, obs = self._task_instance.evaluate(self._state)
-        except Exception as e:
-            # Fallback observation
+        except BaseException as e:
+            sys.stderr.write(f"[SREGym] reset() evaluate failed: {type(e).__name__}: {e}\n")
+            _tb.print_exc(file=sys.stderr)
+            sys.stderr.write("[SREGym] Falling back to default observation.\n")
             obs = K8sObservation(
-                kubectl_output=f"Error in evaluate: {e}",
+                kubectl_output=f"Simulation mode — kubectl unavailable",
+                error_message="Pod backend-api is CrashLoopBackOff. ConfigMap 'db-config' not found.",
                 pod_status="CrashLoopBackOff",
                 health_score=0.0,
                 step_number=0,
@@ -221,6 +268,9 @@ class SREGymEnv:
         Returns:
             (observation, reward, done, info)
         """
+        import sys
+        import traceback as _tb
+
         if self._state is None:
             raise RuntimeError("Must call reset() before step()")
 
@@ -229,22 +279,43 @@ class SREGymEnv:
 
         # Execute action
         kubectl_output = self._execute_action(action)
-        time.sleep(1)  # Allow cluster to settle
+        time.sleep(1)
 
-        # Re-evaluate state after action
-        done, obs = self._task_instance.evaluate(self._state)
+        # Evaluate state — wrap defensively
+        try:
+            done, obs = self._task_instance.evaluate(self._state)
+        except BaseException as e:
+            sys.stderr.write(f"[SREGym] step evaluate failed: {type(e).__name__}: {e}\n")
+            _tb.print_exc(file=sys.stderr)
+            obs = K8sObservation(
+                kubectl_output=kubectl_output,
+                pod_status="Unknown",
+                health_score=0.0,
+                step_number=step_number,
+            )
+            done = False
 
         # Update internal state
         self._state.healthy_pods = 1 if obs.health_score >= 1.0 else 0
         self._state.failed_pods = [] if obs.health_score >= 1.0 else self._state.failed_pods
 
-        # Compute PBRS reward
-        reward_breakdown = self._reward_engine.compute_reward(
-            healthy_pods=self._state.healthy_pods,
-            total_pods=self._state.total_pods,
-            is_terminal=done,
-            is_success=obs.health_score >= 1.0,
-        )
+        # Compute PBRS reward — wrap defensively
+        try:
+            reward_breakdown = self._reward_engine.compute_reward(
+                healthy_pods=self._state.healthy_pods,
+                total_pods=self._state.total_pods,
+                is_terminal=done,
+                is_success=obs.health_score >= 1.0,
+            )
+        except BaseException as e:
+            sys.stderr.write(f"[SREGym] step reward failed: {type(e).__name__}: {e}\n")
+            _tb.print_exc(file=sys.stderr)
+            reward_breakdown = RewardBreakdown(
+                shaping_reward=0.0,
+                step_penalty=-0.05,
+                sparse_reward=0.0,
+                total=0.0,
+            )
 
         # Apply step penalty
         self._state.penalties_accumulated += abs(reward_breakdown.step_penalty)

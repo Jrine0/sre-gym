@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, JsonValue
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 
 class K8sActionType(str, Enum):
@@ -28,7 +28,7 @@ class K8sAction(BaseModel):
     command: list[str] | None = Field(default=None, description="Exec command args")
     options: dict[str, JsonValue] = Field(default_factory=dict)
 
-    model_config = {"str_strip_whitespace": True}
+    model_config = ConfigDict(str_strip_whitespace=True)
 
 
 class K8sObservation(BaseModel):
