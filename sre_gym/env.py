@@ -183,12 +183,31 @@ class SREGymEnv:
         self._cleanup()
         time.sleep(1)
 
-        self._state = self._task_instance.setup()
+        try:
+            self._state = self._task_instance.setup()
+        except Exception as e:
+            # In simulation mode, create a default state
+            self._state = K8sState(
+                healthy_pods=0,
+                total_pods=1,
+                failed_pods=["backend-api"],
+            )
+
         self._episode_start = time.time()
         self._state.episode_start_ts = self._episode_start
 
         # Initial evaluation to get observation
-        _, obs = self._task_instance.evaluate(self._state)
+        try:
+            _, obs = self._task_instance.evaluate(self._state)
+        except Exception as e:
+            # Fallback observation
+            obs = K8sObservation(
+                kubectl_output=f"Error in evaluate: {e}",
+                pod_status="CrashLoopBackOff",
+                health_score=0.0,
+                step_number=0,
+            )
+
         obs.step_number = 0
         self._state.step_number = 0
         return obs
