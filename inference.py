@@ -75,6 +75,9 @@ def log_start(task: str, episode: int, total_episodes: int) -> None:
 def log_step(step: int, action: dict[str, Any], observation: dict[str, Any], reward: float) -> None:
     """Log step in required format."""
     action_type = action.get("action_type", "unknown")
+    # Handle Pydantic enum values (serialize to string)
+    if hasattr(action_type, "value"):
+        action_type = action_type.value
     obs_summary = observation.get("pod_status", "unknown")
     error = observation.get("error_message", "")
     if error:
