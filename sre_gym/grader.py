@@ -181,5 +181,5 @@ class AssertionEngine:
     ) -> float:
         """Compute Stability Index = (System Uptime - Penalties) / Episode Duration."""
         if episode_duration <= 0:
-            return 0.0
-        return max(0.0, (system_uptime - penalties) / episode_duration)
+            return clamp_score(0.0)
+        return clamp_score((system_uptime - penalties) / episode_duration)

@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from sre_gym.models import clamp_score
+
 
 @dataclass
 class PBRSConfig:
@@ -90,7 +92,7 @@ class PBRSEngine:
         cheat_penalty = -0.2 if cheated else 0.0
 
         total = sparse + shaping + step_penalty + cheat_penalty
-        total = max(0.0, min(1.0, total))  # Clamp to [0, 1]
+        total = clamp_score(total)  # Clamp to strict (0, 1)
 
         return RewardBreakdown(
             sparse_reward=sparse,

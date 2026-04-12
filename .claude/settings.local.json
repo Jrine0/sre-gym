@@ -22,7 +22,16 @@
       "Bash(python -c \"from sre_gym.env import SREGymEnv, EnvConfig, KUBECTL_AVAILABLE, SIM_STATE; print\\(f''kubectl available: {KUBECTL_AVAILABLE}''\\); env = SREGymEnv\\(EnvConfig\\(task_difficulty=''easy''\\)\\); obs = env.reset\\(\\); print\\(f''Reset OK: {obs.pod_status}''\\)\")",
       "Bash(python inference.py --task easy --episodes 3 --max-steps 5)",
       "Bash(python -c \"from sre_gym.env import SREGymEnv, EnvConfig; env = SREGymEnv\\(EnvConfig\\(task_difficulty=''easy''\\)\\); obs = env.reset\\(\\); print\\(f''OK: {obs.pod_status}''\\)\")",
-      "Bash(python inference.py --task easy --episodes 1 --max-steps 3)"
+      "Bash(python inference.py --task easy --episodes 1 --max-steps 3)",
+      "Bash(python -c \"from sre_gym.tasks.easy import EasyTask, EasyTaskConfig; from sre_gym.tasks.medium import MediumTask, MediumTaskConfig; from sre_gym.tasks.hard import HardTask, HardTaskConfig; print\\(''All imports OK''\\)\")",
+      "Bash(python -c \":*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(python:*)",
+      "Bash(git fetch:*)",
+      "WebSearch",
+      "Bash(grep:*)"
     ]
   }
 }
