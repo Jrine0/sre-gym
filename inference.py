@@ -58,7 +58,8 @@ from sre_gym.models import K8sAction, K8sActionType
 # Configuration from Environment Variables
 # =============================================================================
 
-API_BASE_URL = os.environ.get("API_BASE_URL", "https://api.groq.com/openai/v1")
+# Validator injects API_BASE_URL and API_KEY. Check injected first, fall back to local dev defaults.
+API_BASE_URL = os.environ.get("API_BASE_URL") or "https://api.groq.com/openai/v1"
 MODEL_NAME = os.environ.get("MODEL_NAME", "llama-3.3-70b-versatile")
 
 
@@ -98,8 +99,8 @@ class K8sAgent:
     """LLM agent that uses kubectl tools to fix K8s issues."""
 
     def __init__(self, model: str = MODEL_NAME, api_base: str = API_BASE_URL):
-        # Get API key - check HF_TOKEN first for HF Inference, then OPENAI_API_KEY
-        api_key = os.environ.get("OPENAI_API_KEY", "")
+        # Priority: validator-injected API_KEY > local OPENAI_API_KEY
+        api_key = os.environ.get("API_KEY") or os.environ.get("OPENAI_API_KEY", "")
         hf_token = os.environ.get("HF_TOKEN", "")
 
         # For Hugging Face Inference API, use HF_TOKEN as Bearer
@@ -274,11 +275,12 @@ def main():
     args = parser.parse_args()
 
     # Validate required environment variables
-    api_key = os.environ.get("OPENAI_API_KEY", "")
+    # Priority: validator-injected API_KEY > local OPENAI_API_KEY
+    api_key = os.environ.get("API_KEY") or os.environ.get("OPENAI_API_KEY", "")
     hf_token = os.environ.get("HF_TOKEN", "")
 
     if not api_key and not hf_token:
-        print("ERROR: Either OPENAI_API_KEY or HF_TOKEN environment variable must be set", flush=True)
+        print("ERROR: API_KEY, OPENAI_API_KEY, or HF_TOKEN environment variable must be set", flush=True)
         print("", flush=True)
         print("Free options:", flush=True)
         print("  1. Groq (FREE): https://console.groq.com - get API key", flush=True)
