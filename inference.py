@@ -249,7 +249,7 @@ def run_episode(env: SREGymEnv, agent: K8sAgent, task: str, episode: int, total_
         if done:
             break
 
-    success = obs.health_score >= 1.0
+    success = done and obs.health_score > 0.999
     duration = time.time() - start_time
     log_end(episode, total_reward, success, step, duration)
 
