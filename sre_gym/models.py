@@ -8,6 +8,19 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 
+def clamp_score(score: float) -> float:
+    """Clamp score to strictly (0, 1) — excludes exact 0.0 and 1.0.
+
+    Meta validator requires all task scores strictly between 0 and 1.
+    Uses 1e-9 epsilon to shift boundary values inward.
+    """
+    if score <= 0.0:
+        return 1e-9
+    if score >= 1.0:
+        return 1.0 - 1e-9
+    return score
+
+
 class K8sActionType(str, Enum):
     APPLY_MANIFEST = "apply_manifest"
     DELETE_RESOURCE = "delete_resource"

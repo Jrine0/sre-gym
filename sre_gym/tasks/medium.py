@@ -7,7 +7,7 @@ from typing import Literal
 
 from pydantic import Field
 
-from sre_gym.models import K8sAction, K8sObservation, K8sState, TaskConfig
+from sre_gym.models import K8sAction, K8sObservation, K8sState, TaskConfig, clamp_score
 from sre_gym.grader import AssertionEngine
 
 
@@ -106,7 +106,7 @@ class MediumTask:
             obs = K8sObservation(
                 kubectl_output=f"Pod memory-app is {phase}",
                 pod_status=phase,
-                health_score=1.0,
+                health_score=clamp_score(1.0),
                 step_number=state.step_number,
             )
         else:
@@ -123,7 +123,7 @@ class MediumTask:
                 kubectl_output=event or f"Pod status: {phase}",
                 error_message=error_msg,
                 pod_status=phase,
-                health_score=healthy / state.total_pods,
+                health_score=clamp_score(healthy / state.total_pods),
                 step_number=state.step_number,
             )
 

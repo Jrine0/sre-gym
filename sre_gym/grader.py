@@ -6,6 +6,8 @@ import json
 import subprocess
 from dataclasses import dataclass
 
+from sre_gym.models import clamp_score
+
 
 def _check_kubectl() -> bool:
     """Check if kubectl is available."""
@@ -135,25 +137,25 @@ class AssertionEngine:
         return len(stdout.strip().split("\n")) if stdout.strip() else 0
 
     def assert_pod_running(self, pod_name: str) -> AssertionResult:
-        """Assert a specific pod is in Running state (binary: 1.0 or 0.0)."""
+        """Assert a specific pod is in Running state."""
         phase = self.get_pod_phase(pod_name)
         if phase == "Running":
             return AssertionResult(
                 passed=True,
-                score=1.0,
+                score=clamp_score(1.0),
                 message=f"Pod {pod_name} is Running"
             )
         elif phase is None:
             return AssertionResult(
                 passed=False,
-                score=0.0,
+                score=clamp_score(0.0),
                 message=f"Pod {pod_name} not found"
             )
         else:
             event = self.get_event_message(pod_name) or "No event available"
             return AssertionResult(
                 passed=False,
-                score=0.0,
+                score=clamp_score(0.0),
                 message=f"Pod {pod_name} is {phase}",
                 details={"phase": phase, "event": event}
             )
@@ -164,12 +166,12 @@ class AssertionEngine:
         total_pods: int | None = None,
         label_selector: str = "",
     ) -> float:
-        """Compute health score = healthy_pods / total_pods."""
+        """Compute health score = healthy_pods / total_pods, clamped to (0, 1)."""
         if healthy_pods is None:
             healthy_pods = self.count_running_pods(label_selector)
         if total_pods is None:
             total_pods = self.count_total_pods(label_selector) or 1
-        return healthy_pods / total_pods
+        return clamp_score(healthy_pods / total_pods)
 
     def compute_stability_index(
         self,

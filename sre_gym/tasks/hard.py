@@ -7,7 +7,7 @@ from typing import Literal
 
 from pydantic import Field
 
-from sre_gym.models import K8sAction, K8sObservation, K8sState, TaskConfig
+from sre_gym.models import K8sAction, K8sObservation, K8sState, TaskConfig, clamp_score
 from sre_gym.grader import AssertionEngine
 
 
@@ -171,7 +171,7 @@ class HardTask:
             kubectl_output=str(phases),
             error_message=root_cause,
             pod_status=", ".join(f"{k}={v}" for k, v in phases.items()),
-            health_score=system_uptime,
+            health_score=clamp_score(system_uptime),
             step_number=state.step_number,
         )
 

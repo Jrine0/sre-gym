@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from sre_gym.models import K8sAction, K8sObservation, K8sState, TaskConfig
+from sre_gym.models import K8sAction, K8sObservation, K8sState, TaskConfig, clamp_score
 from sre_gym.rewards import PBRSConfig, PBRSEngine, RewardBreakdown
 from sre_gym.grader import AssertionEngine
 from sre_gym.tasks.easy import EasyTask
@@ -366,7 +366,7 @@ class SREGymEnv:
 
             # Evaluate initial broken state
             done, obs = SIM_STATE.evaluate(0)
-            obs.health_score = self._clamp_score(obs.health_score)
+            obs.health_score = clamp_score(obs.health_score)
 
             # Reset PBRS engine
             if self._reward_engine is not None:
@@ -396,19 +396,6 @@ class SREGymEnv:
         obs.step_number = 0
         self._state.step_number = 0
         return obs
-
-    @staticmethod
-    def _clamp_score(score: float) -> float:
-        """Clamp score to strictly (0, 1) — excludes exact 0.0 and 1.0.
-
-        Meta validator requires all task scores strictly between 0 and 1.
-        Uses 1e-9 epsilon to shift boundary values inward.
-        """
-        if score <= 0.0:
-            return 1e-9
-        if score >= 1.0:
-            return 1.0 - 1e-9
-        return score
 
     def step(self, action: K8sAction) -> tuple[K8sObservation, float, bool, dict]:
         """Execute one step of the environment.
@@ -458,8 +445,8 @@ class SREGymEnv:
             obs.kubectl_output = kubectl_output
 
             # Clamp all scores to strict (0, 1) for validator compliance
-            final_reward = self._clamp_score(reward_breakdown.total)
-            obs.health_score = self._clamp_score(obs.health_score)
+            final_reward = clamp_score(reward_breakdown.total)
+            obs.health_score = clamp_score(obs.health_score)
 
             info = {
                 "reward_breakdown": reward_breakdown.to_dict(),
